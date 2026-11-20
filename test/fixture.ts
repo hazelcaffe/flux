@@ -246,7 +246,13 @@ export async function fixture() {
     logging.set_level(logging.NONE);
     wisp.options.allow_loopback_ips = true;
     wisp.options.allow_private_ips = true;
-    wisp.options.hostname_whitelist = [/^(?:localhost|127\.0\.0\.1|wrong\.test)$/u];
+    wisp.options.hostname_whitelist = [/^(?:localhost|127\.0\.0\.1)$/u];
+    // Keep localhost for certificate validation, but dial the IPv4-only fixture
+    // regardless of the runner's DNS or /etc/hosts address order.
+    wisp.options.dns_method = async (hostname) => {
+        if (hostname === "localhost") return "127.0.0.1";
+        throw new Error(`Unexpected fixture hostname: ${hostname}`);
+    };
     wisp.options.send_buffer_size = 4;
     proxy.on("upgrade", wisp.routeRequest);
     const tcp = createTCP((socket) => socket.on("data", (data) => socket.write(data)));
