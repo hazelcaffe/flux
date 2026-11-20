@@ -9,6 +9,5 @@
         "rootDir": "src",
         "allowImportingTsExtensions": false
     },
-    "include": ["src"],
-    "exclude": ["test", "demo", "scripts"]
+    "include": ["src"]
 }

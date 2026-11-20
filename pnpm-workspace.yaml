@@ -1,6 +1,5 @@
 allowBuilds:
     esbuild: true
-    bufferutil: false
 packageExtensions:
     "@reclaimprotocol/tls@0.1.5":
         dependencies:

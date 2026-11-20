@@ -1,8 +1,4 @@
 node_modules/
 dist/
-demo-dist/
-coverage/
 .env
 *.log
-test-results/
-playwright-report/

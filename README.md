@@ -17,7 +17,7 @@ Flux is a pure-JavaScript HTTP(S) and WebSocket client that runs in modern brows
   - [Using TLS, TCP, and UDP sockets](#using-tls-tcp-and-udp-sockets)
   - [Using the proxy transport](#using-the-proxy-transport)
   - [Client configuration](#client-configuration)
-- [Wisp server and playground](#wisp-server-and-playground)
+- [Wisp server](#wisp-server)
 - [Compatibility and security](#compatibility-and-security)
 - [Project structure](#project-structure)
 - [License](#license)
@@ -31,11 +31,11 @@ Flux is a pure-JavaScript HTTP(S) and WebSocket client that runs in modern brows
 - Fetch signature with native `Response` body helpers, byte streams and BYOB readers, clone support, immutable response-header methods, and opaque manual redirects.
 - WebSocket-shaped API: `EventTarget`, handler properties, text/Blob/ArrayBuffer messages, subprotocols, masking, fragmentation, ping/pong, close handshake, `binaryType`, `bufferedAmount`.
 - Callback-based TLS sockets, typed raw byte streams, independent HTTP sessions, and a built-in `@mercuryworkshop/proxy-transports` adapter.
-- Strict TypeScript ESNext, Vite library + playground builds, pnpm, Biome (four spaces, double quotes, semicolons), Vitest, Playwright, and CI.
+- Strict TypeScript ESNext, a Vite library build, pnpm, and Biome.
 
 ## Installation and building
 
-Prerequisites: Node.js 22+ and the pnpm version pinned in [`package.json`](package.json). Integration tests also require OpenSSL on `PATH`.
+Prerequisites: Node.js 22+ and the pnpm version pinned in [`package.json`](package.json).
 
 ```sh
 git clone https://github.com/hazelcaffe/flux.git
@@ -50,10 +50,6 @@ Install the generated `skylvi-flux-0.1.0.tgz` in your application with `pnpm add
 ```sh
 pnpm check
 pnpm typecheck
-pnpm test
-pnpm exec playwright install chromium
-pnpm test:browser
-pnpm build:demo   # Builds the static browser playground into demo-dist/
 ```
 
 ## JavaScript API
@@ -64,7 +60,7 @@ pnpm build:demo   # Builds the static browser playground into demo-dist/
 import { Flux } from "@skylvi/flux";
 
 const client = new Flux({
-    wisp_server: "ws://127.0.0.1:4000/wisp/",
+    wisp_server: "wss://your-proxy.example/wisp/",
     onload: () => console.log("[flux] connected"),
     onerror: (error) => console.error("[flux] Wisp connection failed:", error),
 });
@@ -77,7 +73,7 @@ try {
 }
 ```
 
-The example assumes the [local Wisp server](#wisp-server-and-playground) is running. Replace `wisp_server` with your own endpoint as needed. Setting `onload` or `onerror` starts the connection immediately; otherwise it opens on first use or when you call `await client.init()`. `client.ready` reflects the Wisp handshake, and `onload` also fires after a reconnect. `onerror` reports Wisp connection failures. Destination errors are reported by individual requests and sockets.
+Replace `wisp_server` with your [Wisp endpoint](#wisp-server). Setting `onload` or `onerror` starts the connection immediately; otherwise it opens on first use or when you call `await client.init()`. `client.ready` reflects the Wisp handshake, and `onload` also fires after a reconnect. `onerror` reports Wisp connection failures. Destination errors are reported by individual requests and sockets.
 
 `client.fetch` and `new client.WebSocket(...)` do not replace browser globals. **Flux does not enforce CORS or cache HTTP responses.**
 
@@ -111,7 +107,7 @@ client.close();
 
 #### Raw requests
 
-Use `client.request(url, options)` when you need explicit HTTP proxy behavior, such as non-filtered redirects, custom wire headers, duplicate response headers, or trailers. It uses the same Wisp connection and returns `WispResponse`. The playground and built-in transport use this path.
+Use `client.request(url, options)` when you need explicit HTTP proxy behavior, such as non-filtered redirects, custom wire headers, duplicate response headers, or trailers. It uses the same Wisp connection and returns `WispResponse`. The built-in transport uses this path.
 
 Extra raw request options:
 
@@ -251,18 +247,9 @@ TLS options are `verifyServerCertificate` (true), `ca` (additional PEM roots), `
 
 The pure-JS backend requires **secure `crypto.getRandomValues`**, not WASM or `crypto.subtle`. It replaces Reclaim's fallback random-byte function. A checked-in pnpm patch also corrects P-384 certificate signatures and tightens TLS handshake and record handling. `@skylvi/flux/pure-js` is an alias plus `configureCrypto()` for explicit initialization. The packaged SDK has its own bundled Reclaim provider; when consuming workspace source, do not replace the shared Reclaim provider while SDK connections are active.
 
-## Wisp server and playground
+## Wisp server
 
-Run these from the clone in separate terminals:
-
-```sh
-pnpm dev:proxy    # Wisp endpoint: ws://127.0.0.1:4000/wisp/
-pnpm dev          # Open the Vite URL printed in the terminal
-```
-
-The development server uses `wisp-js`, binds to loopback, and accepts browser origins on localhost. The playground exposes `globalThis.Flux` and `globalThis.FluxTransport` for testing in DevTools. Normal package imports do not set these globals.
-
-For a restricted Tailscale demo, run `pnpm build:demo` and then `FLUX_TAILSCALE_IP=$(tailscale ip -4) PORT=4174 pnpm dev:proxy`. The same IP and port serve the playground at `/` and Wisp at `/wisp/`. This mode permits TCP to `example.com` and `echo.websocket.org` on ports 80 and 443. **Do not expose the development proxy publicly.** Use an authenticated, restricted Wisp server for production. HTTPS pages generally need a `wss://` carrier to avoid mixed-content blocking.
+Flux is a client SDK and does not include a proxy server. Set `wisp_server` to an existing endpoint that supports Wisp v1. For production, use an authenticated proxy with destination restrictions. HTTPS pages generally need a `wss://` endpoint to avoid mixed-content blocking.
 
 ## Compatibility and security
 
@@ -276,7 +263,7 @@ For a restricted Tailscale demo, run `pnpm build:demo` and then `FLUX_TAILSCALE_
 - AIA fetching is off by default to avoid direct-network certificate requests, CORS failures and recursive TLS handshakes. Servers should send their intermediate chain. Supply a deliberate bounded `fetchCertificateBytes` callback when necessary; do not recursively call the same TLS request from it.
 - Brotli is advertised only when the runtime provides `DecompressionStream("brotli")`. Unsolicited unsupported encodings throw unless `decompress: false` is set.
 - Wisp v1 cannot pause downstream traffic. A slow consumer that exceeds receive bounds fails the stream instead of buffering indefinitely. UDP is message-oriented, has no delivery guarantees, and cannot preserve datagrams larger than the configured buffer limits.
-- Flux is tested end to end against `wisp-js` and in Chromium, but has not been independently security-audited. See [SECURITY.md](SECURITY.md) before deploying.
+- Flux has not been independently security-audited.
 
 ## Project structure
 
@@ -289,12 +276,8 @@ src/session.ts     HTTP session defaults, cookie jars, connection limits
 src/tls-socket.ts  Callback-based TLS socket API
 src/websocket.ts   RFC 6455 handshake, framing, browser-style API
 src/transport.ts   ProxyTransport adapter
-demo/              Browser playground
-scripts/proxy.ts   Development-only upstream Wisp server
-test/              Unit/protocol and real-server integration tests
-test/browser/      Chromium test with WebAssembly disabled
 ```
 
 ## License
 
-Original Flux code is licensed under the [GNU Affero General Public License, version 3 only](LICENSE) (`AGPL-3.0-only`). Dependencies retain their own licenses; see [NOTICE](NOTICE) and the third-party license report in the build output. The development proxy uses LGPL-licensed `wisp-js`, which is not part of the runtime library.
+Original Flux code is licensed under the [GNU Affero General Public License, version 3 only](LICENSE) (`AGPL-3.0-only`). Dependencies retain their own licenses; see `dist/THIRD_PARTY_LICENSES.md` in the build output.
