@@ -1,0 +1,138 @@
+diff --git a/lib/crypto/pure-js.js b/lib/crypto/pure-js.js
+index 376bfe45965c7c74db3b0d1014460909afd58eaf..71e82b488854320555f9aaa1014ae49350d56f14 100644
+--- a/lib/crypto/pure-js.js
++++ b/lib/crypto/pure-js.js
+@@ -99,9 +99,11 @@ export const pureJsCrypto = {
+             || alg === 'ECDSA-SECP256R1-SHA384'
+             || alg === 'ECDSA-SECP256R1-SHA256') {
+             const parsedPubKey = parseAsn1PublicKey(publicKey);
+-            const curv = alg.includes('P-384') ? p384 : p256;
++            // The certificate signing key and the ECDHE key can have different curves.
++            const curv = [49, 97].includes(parsedPubKey.length) ? p384 : p256;
++            const hash = alg.endsWith('SHA384') ? sha384 : sha256;
+             return curv
+-                .verify(signature, data, parsedPubKey, { prehash: true, format: 'der' });
++                .verify(signature, hash(data), parsedPubKey, { prehash: false, lowS: false, format: 'der' });
+         }
+         if (alg === 'RSA-PSS-SHA256') {
+             const rsaPubKey = parseRsaPublicKeyFromAsn1(publicKey);
+diff --git a/lib/make-tls-client.js b/lib/make-tls-client.js
+index c168ac38f43cb67ad330a32ac398dcb41f26d9e8..16b0974e72e0799ad217e25a6f3de2d6055abb5e 100644
+--- a/lib/make-tls-client.js
++++ b/lib/make-tls-client.js
+@@ -40,6 +40,7 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+     let handshakePacketStream = new Uint8Array();
+     let clientCertificateRequested = false;
+     let certificatesVerified = false;
++    let serverProofVerified = false;
+     const processPacketUnsafe = async ({ type, packet: { content, header } }) => {
+         if (ended) {
+             logger.warn('connection closed, ignoring packet');
+@@ -68,10 +69,17 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+                 // TLS 1.3 has an extra byte suffixed
+                 // this denotes the content type of the
+                 // packet
+-                const contentTypeNum = decrypted
+-                    .plaintext[decrypted.plaintext.length - 1];
++                let endOfContent = decrypted.plaintext.length - 1;
++                while (endOfContent >= 0 && decrypted.plaintext[endOfContent] === 0) {
++                    endOfContent--;
++                }
++                const contentTypeNum = decrypted.plaintext[endOfContent];
+                 contentType = Object.entries(CONTENT_TYPE_MAP)
+                     .find(([, val]) => val === contentTypeNum)?.[0];
++                if (!['HANDSHAKE', 'APPLICATION_DATA', 'ALERT'].includes(contentType)) {
++                    throw new Error('Invalid TLS 1.3 inner content type');
++                }
++                decrypted.plaintext = decrypted.plaintext.subarray(0, endOfContent + 1);
+             }
+             ctx = {
+                 type: 'ciphertext',
+@@ -140,8 +148,15 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+                 const { type, content } = data;
+                 switch (type) {
+                     case SUPPORTED_RECORD_TYPE_MAP.SERVER_HELLO:
++                        if (connTlsVersion) throw new Error('Duplicate server hello');
+                         logger.trace('received server hello');
+                         const hello = await parseServerHello(content);
++                        if (supportedProtocolVersions && !supportedProtocolVersions.includes(hello.serverTlsVersion)) {
++                            throw new Error('Server selected an unoffered TLS version');
++                        }
++                        if (cipherSuites && !cipherSuites.includes(hello.cipherSuite)) {
++                            throw new Error('Server selected an unoffered cipher suite');
++                        }
+                         if (!hello.supportsPsk && earlySecret) {
+                             throw new Error('Server does not support PSK');
+                         }
+@@ -172,18 +187,23 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+                     case SUPPORTED_RECORD_TYPE_MAP.HELLO_RETRY_REQUEST:
+                         throw new Error('Hello retry not supported. Please re-establish connection');
+                     case SUPPORTED_RECORD_TYPE_MAP.CERTIFICATE:
++                        if (certificates) throw new Error('Duplicate server certificate message');
+                         logger.trace({ len: content.length }, 'received certificate');
+                         const result = parseCertificates(content, { version: connTlsVersion });
+                         certificates = result.certificates;
+                         logger.debug({ len: certificates.length }, 'parsed certificates');
++                        if (!certificates.length) throw new Error('Empty server certificate chain');
++                        onRecvCertificates?.({ certificates });
+                         if (verifyServerCertificate && !certificatesVerified) {
+                             await verifyCertificateChain(certificates, host, logger, fetchCertificateBytes, rootCAs);
+                             logger.debug('verified certificate chain');
+                             certificatesVerified = true;
+                         }
+-                        onRecvCertificates?.({ certificates });
+                         break;
+                     case SUPPORTED_RECORD_TYPE_MAP.CERTIFICATE_VERIFY:
++                        if (connTlsVersion !== 'TLS1_3' || serverProofVerified) {
++                            throw new Error('Unexpected server certificate proof');
++                        }
+                         logger.debug({ len: content.length }, 'received certificate verify');
+                         const signature = parseServerCertificateVerify(content);
+                         logger.debug({ alg: signature.algorithm }, 'parsed certificate verify');
+@@ -196,6 +216,7 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+                             publicKey: certificates[0].getPublicKey(),
+                             signatureData,
+                         });
++                        serverProofVerified = true;
+                         break;
+                     case SUPPORTED_RECORD_TYPE_MAP.FINISHED:
+                         await processServerFinish(content);
+@@ -227,6 +248,9 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+                         clientCertificateRequested = true;
+                         break;
+                     case SUPPORTED_RECORD_TYPE_MAP.SERVER_KEY_SHARE:
++                        if (connTlsVersion !== 'TLS1_2' || serverProofVerified) {
++                            throw new Error('Unexpected server key share');
++                        }
+                         logger.trace('received server key share');
+                         if (!certificates?.length) {
+                             throw new Error('No certificates received');
+@@ -250,8 +274,8 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+                             algorithm: keyShare.signatureAlgorithm,
+                             publicKey: certificates[0].getPublicKey(),
+                             signatureData: signatureData12,
+-                            publicKeyType: keyShare.publicKeyType,
+                         });
++                        serverProofVerified = true;
+                         logger.debug('verified server key share signature');
+                         if (verifyServerCertificate && !certificatesVerified) {
+                             await verifyCertificateChain(certificates, host, logger, fetchCertificateBytes, rootCAs);
+@@ -320,6 +344,7 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+             }
+         }
+         else if (contentType === CONTENT_TYPE_MAP.APPLICATION_DATA) {
++            if (!handshakeDone) throw new Error('Application data before handshake completed');
+             logger.trace({ len: record.length }, 'received application data');
+             onApplicationData?.(record);
+         }
+@@ -369,6 +394,10 @@ export function makeTLSClient({ host, verifyServerCertificate = true, rootCAs, l
+         }
+     }
+     async function processServerFinish(serverFinish) {
++        if (handshakeDone) throw new Error('Unexpected duplicate Finished message');
++        if (!earlySecret && keyType !== 'RSA' && !serverProofVerified) {
++            throw new Error('Server did not prove possession of the certificate key');
++        }
+         logger.debug('received server finish');
+         if (!certificatesVerified
+             // when using a PSK, the server does not send certificates

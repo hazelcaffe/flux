@@ -1,0 +1,9 @@
+allowBuilds:
+    esbuild: true
+    bufferutil: false
+packageExtensions:
+    "@reclaimprotocol/tls@0.1.5":
+        dependencies:
+            "@peculiar/asn1-cms": "^2.3.14"
+patchedDependencies:
+    "@reclaimprotocol/tls@0.1.5": patches/@reclaimprotocol__tls@0.1.5.patch

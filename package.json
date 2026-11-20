@@ -1,0 +1,74 @@
+{
+    "name": "@skylvi/flux",
+    "version": "0.1.0",
+    "description": "Pure-JavaScript HTTP and HTTPS client over Wisp with a built-in proxy transport",
+    "type": "module",
+    "license": "AGPL-3.0-only",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/hazelcaffe/flux.git"
+    },
+    "homepage": "https://github.com/hazelcaffe/flux#readme",
+    "bugs": {
+        "url": "https://github.com/hazelcaffe/flux/issues"
+    },
+    "packageManager": "pnpm@12.16.1",
+    "engines": {
+        "node": ">=22"
+    },
+    "files": [
+        "dist",
+        "src",
+        "README.md",
+        "SECURITY.md",
+        "LICENSE",
+        "NOTICE"
+    ],
+    "sideEffects": false,
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./transport": {
+            "types": "./dist/transport.d.ts",
+            "import": "./dist/transport.js"
+        },
+        "./pure-js": {
+            "types": "./dist/pure-js.d.ts",
+            "import": "./dist/pure-js.js"
+        }
+    },
+    "scripts": {
+        "dev": "vite --host 127.0.0.1",
+        "dev:proxy": "tsx scripts/proxy.ts",
+        "build": "vite build && tsc -p tsconfig.build.json",
+        "build:demo": "vite build --config vite.demo.config.ts",
+        "typecheck": "tsc --noEmit",
+        "check": "biome check .",
+        "format": "biome check --write .",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:browser": "pnpm build && playwright test",
+        "prepack": "pnpm build"
+    },
+    "dependencies": {
+        "@mercuryworkshop/proxy-transports": "1.0.2",
+        "@noble/hashes": "^1.8.0",
+        "@peculiar/x509": "^1.14.3",
+        "@reclaimprotocol/tls": "0.1.5",
+        "tough-cookie": "^6.1.0"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "^2.4.0",
+        "@mercuryworkshop/wisp-js": "^0.5.3",
+        "@playwright/test": "^1.65.1",
+        "@types/node": "^24.0.0",
+        "@types/ws": "^8.18.0",
+        "tsx": "^4.21.0",
+        "typescript": "^5.9.3",
+        "vite": "^7.3.0",
+        "vitest": "^4.0.0",
+        "ws": "^8.19.0"
+    }
+}
